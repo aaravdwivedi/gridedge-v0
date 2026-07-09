@@ -1,32 +1,48 @@
-# gridedge-v0
-# GridEdge v0.1
+# GridEdge 🏈
 
-GridEdge is a fantasy football analytics project focused on building confidence-aware start/sit recommendations. Most fantasy tools give a single point projection, but this project explores whether a model can also estimate how trustworthy that projection is.
+**Confidence-aware fantasy football start/sit recommendations for wide receivers.**
 
-This early version builds a weekly wide receiver fantasy football projection model using historical NFL play-by-play data. It engineers player usage, recent performance, volatility, and matchup-context features, then compares multiple models against a simple baseline.
+Most fantasy tools give you a single projection and treat it as equally trustworthy every time. GridEdge pairs each projection with a validated risk tier, so you know not just *who* to start, but *how much to trust the call*.
 
-## Current Status
+**🔗 Live app:** [gridedge-v0.streamlit.app](https://gridedge-v0.streamlit.app/)
 
-This is an early prototype, not a finished product. The current notebook focuses on building the first working WR projection model and testing whether machine learning can improve over simple fantasy-point baselines.
+## The Idea
 
-## Features So Far
+Some player projections are inherently more predictable than others. A player in a stable, high-volume role is easier to project than one with recent volatile scoring. GridEdge tests whether a simple, interpretable confidence signal actually tracks real prediction error — and validates that it does.
 
-* Loads NFL play-by-play data from multiple seasons
-* Creates weekly WR fantasy football data
-* Engineers rolling usage and recent performance features
-* Adds matchup-context features based on opponent defensive performance
-* Compares baseline, linear regression, ridge regression, random forest, and gradient boosting models
-* Includes an early start/sit comparison function
-* Begins exploring player risk using volatility/error patterns
+## Key Findings
 
-## Research Question
+- **Usage beats matchup.** Recent target volume and production account for ~31% of the model's decision-making, vs. ~12% for opponent defensive strength — a quantitative confirmation that "target share is king."
+- **The risk label is real, not decorative.** Predictions flagged High Risk have 51% higher average error than Low Risk predictions (5.78 vs. 3.82 MAE), validated on held-out test data.
+- **Model choice barely matters here.** Random Forest, Gradient Boosting, Ridge, and Linear Regression all landed within 0.05 MAE of each other — motivating the shift toward confidence-aware output rather than chasing marginal accuracy gains.
 
-Can matchup-context features and model uncertainty estimates improve weekly fantasy football start/sit recommendations by identifying when player point projections are more or less trustworthy?
+Full write-up with methodology and limitations: see `GridEdge_Writeup.md`.
 
-## Next Steps
+## How It Works
 
-* Add true Random Forest tree-spread uncertainty
-* Validate whether higher uncertainty corresponds to higher real prediction error
-* Create confidence buckets for start/sit decisions
-* Build a Streamlit app for player comparisons
-* Improve matchup context with Vegas lines, pace, and game-script features
+1. **Data:** NFL play-by-play data (2021–2024), filtered to WRs, aggregated to player-game level via `nflreadpy`
+2. **Features:** Lagged rolling averages (3/5/8-game targets, receptions, yards, PPR), season averages, target share, scoring volatility, and opponent defensive strength allowed to the position
+3. **Model:** Random Forest Regressor, trained on the above features to predict weekly PPR points
+4. **Risk tiering:** Each prediction is labeled Low / Medium / High Risk based on the player's recent scoring volatility, validated against actual model error
+
+## Repo Contents
+
+| File | Purpose |
+|---|---|
+| `GridEdge_Model.ipynb` | Full data pipeline, feature engineering, model training, and validation |
+| `app.py` | Streamlit app — loads the trained model and serves player comparisons |
+| `gridedge_model_compressed.pkl` | Trained Random Forest model |
+| `gridedge_data.csv` | Processed player-game data used by the app |
+| `requirements.txt` | Python dependencies for deployment |
+| `GridEdge_Writeup.md` | Research write-up: question, methodology, findings, limitations |
+
+## Limitations & Next Steps
+
+- Feature importance may understate correlated rolling-window features (mean decrease in impurity bias)
+- Risk label is based on player volatility, not the model's internal prediction uncertainty (e.g., Random Forest tree-variance) — a stronger, model-based confidence signal is a natural next step
+- Currently WR-only; other positions would need re-validation
+- Two-season training window; more seasons would strengthen validation
+
+## Built By
+
+Aarav Dwivedi
