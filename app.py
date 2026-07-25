@@ -54,13 +54,9 @@ features = [
 ]
 
 # Tree-variance quantile thresholds, computed on the 2024 test set
-# (test_rows["tree_variance"].quantile([0.333, 0.667]))
 TREE_VAR_LOW_CUTOFF = 3.714682
 TREE_VAR_HIGH_CUTOFF = 5.163778
 
-# -----------------------------
-# Same helper functions from your notebook
-# -----------------------------
 def get_latest_player_row(player_name, data):
     exact_matches = data[
         data["receiver_player_name"].str.lower() == player_name.lower()
@@ -125,8 +121,6 @@ def explain_player(row, projection):
 
 
 def get_tree_variance(row_X, model):
-    """Standard deviation of predictions across every tree in the forest —
-    the model's own internal uncertainty for this specific prediction."""
     tree_preds = np.array([tree.predict(row_X)[0] for tree in model.estimators_])
     return tree_preds.std()
 
@@ -184,9 +178,6 @@ def compare_players(player_a, player_b, data, model, features):
     }
 
 
-# -----------------------------
-# Streamlit UI
-# -----------------------------
 st.set_page_config(page_title="GridEdge", page_icon="🏈")
 
 st.title("🏈 GridEdge")
@@ -240,11 +231,10 @@ st.divider()
 with st.expander("How does the risk score work?"):
     st.write(
         "Risk is based on how much GridEdge's 400 individual decision trees "
-        "disagree with each other on a given prediction — not just the player's "
-        "own scoring history. When the trees agree closely, the prediction is "
-        "labeled Low Risk. When they disagree widely, it's labeled High Risk. "
-        "This model-based signal was validated against real prediction error and "
-        "found to separate accurate from inaccurate predictions more than twice "
-        "as effectively as a simpler, player-history-based approach "
-        "(105% error gap vs. 51%)."
+        "disagree with each other on a given prediction. When the trees agree "
+        "closely, the prediction is labeled Low Risk. When they disagree widely, "
+        "it's labeled High Risk. This model-based signal was validated against "
+        "real prediction error and found to separate accurate from inaccurate "
+        "predictions more than twice as effectively as a simpler, player-history-"
+        "based approach (105% error gap vs. 51%)."
     )
