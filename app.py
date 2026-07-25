@@ -31,11 +31,11 @@ features = [
     "last_5_yards",
     "last_5_ppr",
     "last_5_target_share",
-    "last_5_adot",
-    "last_5_red_zone_share",
     "last_8_targets",
     "last_8_ppr",
     "last_8_target_share",
+    "last_5_adot",
+    "last_5_red_zone_share",
 
     # season player averages
     "season_avg_targets",
