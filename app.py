@@ -4,7 +4,7 @@ import numpy as np
 import joblib
 
 # -----------------------------
-# Load model and data (cached so it only loads once, not on every click)
+# Load model and data
 # -----------------------------
 @st.cache_resource
 def load_model():
@@ -18,68 +18,36 @@ rf_model = load_model()
 model_data = load_data()
 
 features = [
-    # recent player volume
-    "last_3_targets",
-    "last_3_receptions",
-    "last_3_yards",
-    "last_3_ppr",
-    "last_3_ppr_std",
-
-    # longer player trends
-    "last_5_targets",
-    "last_5_receptions",
-    "last_5_yards",
-    "last_5_ppr",
-    "last_5_target_share",
-    "last_8_targets",
-    "last_8_ppr",
-    "last_8_target_share",
-    "last_5_adot",
-    "last_5_red_zone_share",
-
-    # season player averages
-    "season_avg_targets",
-    "season_avg_receptions",
-    "season_avg_yards",
-    "season_avg_ppr",
-
-    # matchup
-    "def_allowed_ppr_last_5",
-    "def_allowed_targets_last_5",
-    "def_allowed_yards_last_5",
-    "def_allowed_tds_last_5",
-
-    # context
+    "last_3_targets", "last_3_receptions", "last_3_yards", "last_3_ppr", "last_3_ppr_std",
+    "last_5_targets", "last_5_receptions", "last_5_yards", "last_5_ppr", "last_5_target_share",
+    "last_8_targets", "last_8_ppr", "last_8_target_share",
+    "last_5_adot", "last_5_red_zone_share",
+    "season_avg_targets", "season_avg_receptions", "season_avg_yards", "season_avg_ppr",
+    "def_allowed_ppr_last_5", "def_allowed_targets_last_5", "def_allowed_yards_last_5", "def_allowed_tds_last_5",
     "week"
 ]
 
-# Tree-variance quantile thresholds, computed on the 2024 test set
 TREE_VAR_LOW_CUTOFF = 3.714682
 TREE_VAR_HIGH_CUTOFF = 5.163778
 
+# -----------------------------
+# Helper functions
+# -----------------------------
 def get_latest_player_row(player_name, data):
-    exact_matches = data[
-        data["receiver_player_name"].str.lower() == player_name.lower()
-    ].copy()
-
+    exact_matches = data[data["player_display_name"].str.lower() == player_name.lower()].copy()
     if not exact_matches.empty:
         return exact_matches.sort_values(["season", "week"]).iloc[-1]
+    return None
 
-    partial_matches = data[
-        data["receiver_player_name"].str.contains(player_name, case=False, na=False)
-    ].copy()
 
-    if partial_matches.empty:
-        return None
-
-    best_match_name = (
-        partial_matches["receiver_player_name"]
-        .value_counts()
-        .idxmax()
+def get_player_trend(player_name, data, n=4):
+    rows = data[data["player_display_name"].str.lower() == player_name.lower()].copy()
+    rows = rows.sort_values(["season", "week"]).tail(n)
+    trend = rows[["season", "week", "target", "ppr_points", "air_yards"]].rename(
+        columns={"target": "Targets", "ppr_points": "PPR Points", "air_yards": "Air Yards"}
     )
-
-    best_matches = data[data["receiver_player_name"] == best_match_name].copy()
-    return best_matches.sort_values(["season", "week"]).iloc[-1]
+    trend["Game"] = trend["season"].astype(str) + " Wk " + trend["week"].astype(str)
+    return trend.set_index("Game")[["Targets", "PPR Points", "Air Yards"]]
 
 
 def get_risk_label_from_tree_variance(tree_variance):
@@ -101,21 +69,38 @@ def get_confidence_label(point_difference):
 
 
 def explain_player(row, projection):
+    """Builds specific, numeric explanations so two players never get identical text."""
     explanations = []
 
-    if row["last_3_targets"] > row["season_avg_targets"]:
-        explanations.append("Target volume is trending up recently.")
-    elif row["last_3_targets"] < row["season_avg_targets"]:
-        explanations.append("Target volume is trending down recently.")
+    target_change = row["last_3_targets"] - row["season_avg_targets"]
+    if abs(target_change) >= 1:
+        direction = "up" if target_change > 0 else "down"
+        explanations.append(
+            f"Target volume trending {direction}: {row['last_3_targets']:.1f}/gm recently vs "
+            f"{row['season_avg_targets']:.1f}/gm season avg."
+        )
     else:
-        explanations.append("Target volume is close to season average.")
+        explanations.append(f"Target volume steady near season average ({row['season_avg_targets']:.1f}/gm).")
 
-    if row["last_3_ppr"] > row["season_avg_ppr"]:
-        explanations.append("Recent fantasy production is above season average.")
-    elif row["last_3_ppr"] < row["season_avg_ppr"]:
-        explanations.append("Recent fantasy production is below season average.")
+    ppr_change = row["last_3_ppr"] - row["season_avg_ppr"]
+    if abs(ppr_change) >= 1:
+        direction = "above" if ppr_change > 0 else "below"
+        explanations.append(
+            f"Recent production {direction} season average by {abs(ppr_change):.1f} pts "
+            f"({row['last_3_ppr']:.1f} vs {row['season_avg_ppr']:.1f})."
+        )
     else:
-        explanations.append("Recent fantasy production is close to season average.")
+        explanations.append("Recent production is in line with season average.")
+
+    if row["last_5_adot"] >= 12:
+        explanations.append(f"Deep-threat usage: {row['last_5_adot']:.1f} avg depth of target.")
+    elif row["last_5_adot"] <= 6:
+        explanations.append(f"Short/possession usage: {row['last_5_adot']:.1f} avg depth of target.")
+    else:
+        explanations.append(f"Intermediate route depth: {row['last_5_adot']:.1f} avg depth of target.")
+
+    if row["last_5_red_zone_share"] >= 0.20:
+        explanations.append(f"Notable red zone role: {row['last_5_red_zone_share']*100:.0f}% of recent targets.")
 
     return explanations
 
@@ -154,36 +139,29 @@ def compare_players(player_a, player_b, data, model, features):
         "confidence": confidence,
         "point_difference": round(difference, 2),
         "player_a": {
-            "name": a["receiver_player_name"],
-            "team": a["posteam"],
-            "projection": round(a_proj, 2),
-            "last_3_targets": round(a["last_3_targets"], 2),
-            "last_3_ppr": round(a["last_3_ppr"], 2),
-            "season_avg_ppr": round(a["season_avg_ppr"], 2),
-            "risk": a_risk,
-            "tree_variance": round(a_tree_var, 2),
-            "explanation": explain_player(a, a_proj)
+            "name": a["player_display_name"], "team": a["posteam"],
+            "projection": round(a_proj, 2), "last_3_ppr": round(a["last_3_ppr"], 2),
+            "season_avg_ppr": round(a["season_avg_ppr"], 2), "risk": a_risk,
+            "tree_variance": round(a_tree_var, 2), "explanation": explain_player(a, a_proj),
         },
         "player_b": {
-            "name": b["receiver_player_name"],
-            "team": b["posteam"],
-            "projection": round(b_proj, 2),
-            "last_3_targets": round(b["last_3_targets"], 2),
-            "last_3_ppr": round(b["last_3_ppr"], 2),
-            "season_avg_ppr": round(b["season_avg_ppr"], 2),
-            "risk": b_risk,
-            "tree_variance": round(b_tree_var, 2),
-            "explanation": explain_player(b, b_proj)
+            "name": b["player_display_name"], "team": b["posteam"],
+            "projection": round(b_proj, 2), "last_3_ppr": round(b["last_3_ppr"], 2),
+            "season_avg_ppr": round(b["season_avg_ppr"], 2), "risk": b_risk,
+            "tree_variance": round(b_tree_var, 2), "explanation": explain_player(b, b_proj),
         }
     }
 
 
+# -----------------------------
+# Streamlit UI
+# -----------------------------
 st.set_page_config(page_title="GridEdge", page_icon="🏈")
 
 st.title("🏈 GridEdge")
 st.caption("Confidence-aware WR start/sit recommendations")
 
-player_list = sorted(model_data["receiver_player_name"].dropna().unique().tolist())
+player_list = sorted(model_data["player_display_name"].dropna().unique().tolist())
 
 col1, col2 = st.columns(2)
 with col1:
@@ -209,7 +187,7 @@ if st.button("Compare", type="primary"):
             st.divider()
 
             c1, c2 = st.columns(2)
-            for col, key in [(c1, "player_a"), (c2, "player_b")]:
+            for col, key, name in [(c1, "player_a", player_a), (c2, "player_b", player_b)]:
                 p = result[key]
                 with col:
                     st.markdown(f"### {p['name']}")
@@ -220,21 +198,21 @@ if st.button("Compare", type="primary"):
                     st.write(f"**Risk level:** {risk_color.get(p['risk'], '')} {p['risk']}")
                     st.caption(f"Model uncertainty score: {p['tree_variance']}")
 
-                    st.write(f"**Last 3 games avg:** {p['last_3_ppr']} PPR")
-                    st.write(f"**Season avg:** {p['season_avg_ppr']} PPR")
-
                     st.write("**Why:**")
                     for reason in p["explanation"]:
                         st.write(f"- {reason}")
+
+                    st.write("**Last 4 games:**")
+                    trend = get_player_trend(name, model_data, n=4)
+                    if not trend.empty:
+                        st.line_chart(trend)
 
 st.divider()
 with st.expander("How does the risk score work?"):
     st.write(
         "Risk is based on how much GridEdge's 400 individual decision trees "
-        "disagree with each other on a given prediction. When the trees agree "
-        "closely, the prediction is labeled Low Risk. When they disagree widely, "
-        "it's labeled High Risk. This model-based signal was validated against "
-        "real prediction error and found to separate accurate from inaccurate "
-        "predictions more than twice as effectively as a simpler, player-history-"
-        "based approach (105% error gap vs. 51%)."
+        "disagree with each other on a given prediction. This model-based signal "
+        "separates accurate from inaccurate predictions more than twice as "
+        "effectively as a simpler, player-history-based approach "
+        "(105% error gap vs. 51%)."
     )
